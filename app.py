@@ -1,17 +1,13 @@
 import os
 import subprocess
+import random
+import string
+import json
 from flask import Flask, request, Response, render_template_string
 import static_ffmpeg
 
 static_ffmpeg.add_paths()
 app = Flask(__name__)
-
-VIDEOS = [
-    {"title": "Me at the zoo", "url": "https://www.youtube.com/watch?v=jNQXAC9IVRw"},
-    {"title": "Never Gonna Give You Up", "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"},
-    {"title": "Charlie bit my finger", "url": "https://www.youtube.com/watch?v=_OBlgSz8sSM"},
-    {"title": "Evolution of Dance", "url": "https://www.youtube.com/watch?v=dMH0bHeiRNg"}
-]
 
 INDEX_HTML = """
 <!DOCTYPE html>
@@ -41,6 +37,7 @@ INDEX_HTML = """
         <li><a href="/watch?url={{ v.url }}">{{ v.title }}</a></li>
     {% endfor %}
     </ul>
+    <a class="back-link" href="/">Refresh Random Videos</a>
 {% elif mode == 'watch' %}
     <h1>Media Player</h1>
     <div class="video-container">
@@ -55,6 +52,30 @@ INDEX_HTML = """
 </html>
 """
 
+def get_random_videos():
+    chars = ''.join(random.choices(string.ascii_lowercase, k=3))
+    command = [
+        "yt-dlp",
+        f"ytsearch5:{chars}",
+        "--dump-json",
+        "--flat-playlist",
+        "--ignore-errors"
+    ]
+    result = subprocess.run(command, capture_output=True, text=True)
+    videos = []
+    for line in result.stdout.splitlines():
+        if line.strip():
+            try:
+                data = json.loads(line)
+                if 'id' in data and 'title' in data:
+                    videos.append({
+                        "title": data['title'],
+                        "url": f"https://www.youtube.com/watch?v={data['id']}"
+                    })
+            except json.JSONDecodeError:
+                pass
+    return videos
+
 def get_stream_url(video_url):
     command = [
         "yt-dlp",
@@ -67,7 +88,8 @@ def get_stream_url(video_url):
 
 @app.route("/")
 def home():
-    return render_template_string(INDEX_HTML, mode='index', videos=VIDEOS)
+    videos = get_random_videos()
+    return render_template_string(INDEX_HTML, mode='index', videos=videos)
 
 @app.route("/watch")
 def watch():
@@ -76,7 +98,7 @@ def watch():
 
 @app.route("/stream")
 def stream_video():
-    video_url = request.args.get("url", "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+    video_url = request.args.get("url")
     try:
         stream_url = get_stream_url(video_url)
     except subprocess.CalledProcessError:
