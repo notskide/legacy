@@ -18,6 +18,9 @@ def get_stream_url(video_url):
     ]
     result = subprocess.run(command, capture_output=True, text=True, check=True)
     return result.stdout.strip()
+@app.route("/")
+def home():
+    return "Legacy Proxy Online", 200
 
 @app.route("/stream")
 def stream_video():
@@ -64,3 +67,4 @@ def stream_video():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)
+
