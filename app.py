@@ -26,22 +26,35 @@ INDEX_HTML = """
     .video-container { text-align: center; margin-top: 5px; }
     video { max-width: 100%; border: 1px solid #000; background-color: #000; }
     .back-link { display: block; margin-top: 10px; font-size: 14px; text-align: center; font-weight: bold; }
+    .search-box { margin-bottom: 10px; text-align: center; }
+    input[type="text"] { width: 70%; padding: 2px; border: 1px solid #808080; }
+    input[type="submit"] { padding: 2px 5px; background: #d4d0c8; border: 1px solid #808080; cursor: pointer; }
 </style>
 </head>
 <body>
 <div class="container">
+    <div class="search-box">
+        <form action="/" method="GET">
+            <input type="text" name="q" value="{{ query }}">
+            <input type="submit" value="Search">
+        </form>
+    </div>
 {% if mode == 'index' %}
-    <h1>Video Directory</h1>
+    <h1>{{ "Search Results" if query else "Random Videos" }}</h1>
     <ul>
     {% for v in videos %}
         <li><a href="/watch?url={{ v.url }}">{{ v.title }}</a></li>
     {% endfor %}
     </ul>
-    <a class="back-link" href="/">Refresh Random Videos</a>
+    {% if not query %}
+        <a class="back-link" href="/">Refresh Random</a>
+    {% else %}
+        <a class="back-link" href="/">&lt;&lt; Home</a>
+    {% endif %}
 {% elif mode == 'watch' %}
     <h1>Media Player</h1>
     <div class="video-container">
-        <video controls autoplay>
+        <video controls autoplay preload="none">
             <source src="/stream?url={{ video_url }}" type="video/mp4">
         </video>
     </div>
@@ -52,11 +65,10 @@ INDEX_HTML = """
 </html>
 """
 
-def get_random_videos():
-    chars = ''.join(random.choices(string.ascii_lowercase, k=3))
+def search_videos(query, count=5):
     command = [
         "yt-dlp",
-        f"ytsearch5:{chars}",
+        f"ytsearch{count}:{query}",
         "--dump-json",
         "--flat-playlist",
         "--ignore-errors"
@@ -76,6 +88,10 @@ def get_random_videos():
                 pass
     return videos
 
+def get_random_videos():
+    chars = ''.join(random.choices(string.ascii_lowercase, k=3))
+    return search_videos(chars, 5)
+
 def get_stream_url(video_url):
     command = [
         "yt-dlp",
@@ -88,13 +104,17 @@ def get_stream_url(video_url):
 
 @app.route("/")
 def home():
-    videos = get_random_videos()
-    return render_template_string(INDEX_HTML, mode='index', videos=videos)
+    query = request.args.get("q", "").strip()
+    if query:
+        videos = search_videos(query, 10)
+    else:
+        videos = get_random_videos()
+    return render_template_string(INDEX_HTML, mode='index', videos=videos, query=query)
 
 @app.route("/watch")
 def watch():
     video_url = request.args.get("url")
-    return render_template_string(INDEX_HTML, mode='watch', video_url=video_url)
+    return render_template_string(INDEX_HTML, mode='watch', video_url=video_url, query="")
 
 @app.route("/stream")
 def stream_video():
@@ -106,6 +126,7 @@ def stream_video():
 
     ffmpeg_command = [
         "ffmpeg",
+        "-re",
         "-i", stream_url,
         "-vf", "scale=320:-2",
         "-c:v", "libx264",
@@ -116,7 +137,7 @@ def stream_video():
         "-c:a", "aac",
         "-b:a", "64k",
         "-f", "mp4",
-        "-movflags", "frag_keyframe+empty_moov",
+        "-movflags", "frag_keyframe+empty_moov+default_base_moof",
         "pipe:1"
     ]
 
@@ -128,14 +149,25 @@ def stream_video():
         )
         try:
             while True:
-                chunk = process.stdout.read(4096)
+                chunk = process.stdout.read(8192)
                 if not chunk:
                     break
                 yield chunk
         finally:
             process.terminate()
 
-    return Response(generate(), mimetype="video/mp4")
+    return Response(generate(), mimetype="video/mp4", direct_passthrough=True)
+
+@app.route("/api/search")
+def api_search():
+    query = request.args.get("q", "").strip()
+    if not query:
+        videos = get_random_videos()
+    else:
+        videos = search_videos(query, 10)
+    
+    response_text = "\n".join([f"{v['title']}|{v['url']}" for v in videos])
+    return Response(response_text, mimetype="text/plain")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)
